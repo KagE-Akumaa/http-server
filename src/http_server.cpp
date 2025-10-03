@@ -7,9 +7,13 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <sstream>
 using namespace std;
-// FIXME: This class does not work don't use- need to add a way to release the socket
+struct HTTP_Request {
+    string method;
+    string path;
+    unordered_map<string, string> headers;  // they come after the http version
+    string body;
+};
 class HTTP_SERVER {
    private:
     int serverSocket;
@@ -20,9 +24,14 @@ class HTTP_SERVER {
     void httpRequestParser(int clientSocket, string& method, string& path) {
         char requestBuffer[5000] = {0};
         read(clientSocket, requestBuffer, 5000);
+
+        cout << requestBuffer << endl;
         int space_count = 0;
 
-        // NOTE: Logic for handling the path and request method
+        // NOTE: this is testing for HTTP_REQUEST object
+        HTTP_Request request;
+
+        // NOTE: Logic for parsing the path and request method
         for (int i = 0; requestBuffer[i] != '\0'; i++) {
             if (space_count == 0) {
                 if (requestBuffer[i] == ' ') {
@@ -44,6 +53,66 @@ class HTTP_SERVER {
         if (path == "/favicon.ico") {
             path = "/";
         }
+        request.method = method;
+        request.path = path;
+
+        cout << request.method << endl << request.path << endl;
+        // TODO: need to make parsing logic for body and headers
+
+        vector<string> str;
+        string s = "";
+        for (int i = 0; requestBuffer[i] != '\0'; i++) {
+            // if (requestBuffer[i] == '{') {
+            //     break;
+            // }
+            if (requestBuffer[i] == '\n') {
+                str.push_back(s);
+                s = "";
+            } else {
+                s += requestBuffer[i];
+            }
+        }
+        for (string p : str) {
+            string key = "", value = "";
+            bool foundColon = false;
+            if (p == "\r\n\r\n") {
+                break;
+            }
+            for (int i = 0; i < p.size(); i++) {
+                if (p[i] == ':') {
+                    foundColon = true;
+                    continue;
+                } else if (!foundColon) {
+                    key.push_back(p[i]);
+                } else if (foundColon) {
+                    value += p[i];
+                }
+            }
+
+            if (foundColon) {
+                request.headers[key] = value;
+            }
+        }
+        // For body 
+        string findBody(requestBuffer);
+        size_t pos = findBody.find("\r\n\r\n");
+        if(pos != string::npos){
+            string body = findBody.substr(pos + 4);
+
+            int contentLength = 0;
+
+            if(request.headers.find("Content-Length") != request.headers.end()){
+                // in the map
+                contentLength = stoi(request.headers["Content-Length"]);
+            }
+
+            if(contentLength > 0 && body.size() >= (size_t)contentLength){
+                request.body = body.substr(0, contentLength);
+            }
+        }
+        cout << "Printing the body ---->:" << endl;
+
+        cout << request.body << endl;
     }
 
    public:
@@ -95,11 +164,13 @@ class HTTP_SERVER {
 
                 file.close();
                 string response =
-                    "HTTP/1.1 404 OK\r\n"
+                    "HTTP/1.1 404 Page not found\r\n"
                     "Content-Type: text/html\r\n"
-                    "Content-Length:" + to_string(page.size()) + " \r\n"
+                    "Content-Length:" +
+                    to_string(page.size()) +
                     "\r\n"
-                    +page;
+                    "\r\n" +
+                    page;
                 send(clientSocket, response.c_str(), response.size(), 0);
             }
 
