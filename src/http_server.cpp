@@ -7,6 +7,8 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <string>
+#include <unordered_map>
 using namespace std;
 struct HTTP_Request {
     string method;
@@ -18,33 +20,58 @@ class HTTP_SERVER {
    private:
     int serverSocket;
     sockaddr_in serverSocketAddress;
+   // NOTE: This is how the strucutre of routes will look unordered_map<string, function<void(int, HTTP_Request&, HTTP_Response&)>> getRoutes; request should be const no change allowed
     unordered_map<string, function<void(int)>> getRoutes;
 
     // NOTE: Function to handle method and path of a request
     void httpRequestParser(int clientSocket, string& method, string& path) {
-        char requestBuffer[5000] = {0};
-        read(clientSocket, requestBuffer, 5000);
+        char requestBuffer[8000] = {0};
+        read(clientSocket, requestBuffer, sizeof(requestBuffer));
 
-        cout << requestBuffer << endl;
+        string mainBuffer(requestBuffer);
+
+        // TODO: need to check if headers are inside the requestbuffer if not then need to read
+        // again until size become more than 32 kb or headers are done processing - DONE
+        size_t headerPos = mainBuffer.find("\r\n\r\n");
+        if (headerPos == string::npos) {
+            // means we did not find the headers
+            while (mainBuffer.size() <= 32000) {
+                char tempBuffer[8000] = {0};
+                headerPos = mainBuffer.find("\r\n\r\n");
+                if (headerPos != string::npos) {
+                    // found the headers
+                    break;
+                }
+                // we need to read into a temp buffer and append it to main buffer
+                size_t bytesRead = read(clientSocket, tempBuffer, sizeof(tempBuffer));
+                if (bytesRead <= 0) {
+                    // FIXME: if any errors comes in this we need to do something on the response
+                    // object
+                    break;
+                }
+                mainBuffer.append(tempBuffer, bytesRead);
+            }
+        }
         int space_count = 0;
+        // NOTE: now main buffer is the string which contains all the request headers
+        // NOTE: this is testing for HTTP_REQUEST object - THIS WORKS FULLY NOW
 
-        // NOTE: this is testing for HTTP_REQUEST object
         HTTP_Request request;
 
         // NOTE: Logic for parsing the path and request method
-        for (int i = 0; requestBuffer[i] != '\0'; i++) {
+        for (int i = 0; i < mainBuffer.size(); i++) {
             if (space_count == 0) {
-                if (requestBuffer[i] == ' ') {
+                if (mainBuffer[i] == ' ') {
                     space_count++;
                     continue;
                 }
-                method.push_back(requestBuffer[i]);
+                method.push_back(mainBuffer[i]);
             } else if (space_count == 1) {
-                if (requestBuffer[i] == ' ') {
+                if (mainBuffer[i] == ' ') {
                     space_count++;
                     break;
                 }
-                path.push_back(requestBuffer[i]);
+                path.push_back(mainBuffer[i]);
             } else {
                 break;
             }
@@ -56,28 +83,29 @@ class HTTP_SERVER {
         request.method = method;
         request.path = path;
 
-        cout << request.method << endl << request.path << endl;
-        // TODO: need to make parsing logic for body and headers
+        // TODO: need to make parsing logic for body and headers - DONE
 
+        string headerPart = mainBuffer.substr(0, headerPos);
         vector<string> str;
         string s = "";
-        for (int i = 0; requestBuffer[i] != '\0'; i++) {
-            // if (requestBuffer[i] == '{') {
-            //     break;
-            // }
-            if (requestBuffer[i] == '\n') {
+        for (int i = 0; i < headerPart.size(); i++) {
+            if (headerPart[i] == '\n') {
+                if (!s.empty() && s.back() == '\r') {
+                    s.pop_back();
+                }
                 str.push_back(s);
                 s = "";
             } else {
-                s += requestBuffer[i];
+                s += headerPart[i];
             }
+        }
+        // Check for any string which is not pushed
+        if (!s.empty()) {
+            str.push_back(s);
         }
         for (string p : str) {
             string key = "", value = "";
             bool foundColon = false;
-            if (p == "\r\n\r\n") {
-                break;
-            }
             for (int i = 0; i < p.size(); i++) {
                 if (p[i] == ':') {
                     foundColon = true;
@@ -93,26 +121,54 @@ class HTTP_SERVER {
                 request.headers[key] = value;
             }
         }
-        // For body 
-        string findBody(requestBuffer);
-        size_t pos = findBody.find("\r\n\r\n");
-        if(pos != string::npos){
-            string body = findBody.substr(pos + 4);
 
-            int contentLength = 0;
+        //        For body
 
-            if(request.headers.find("Content-Length") != request.headers.end()){
-                // in the map
-                contentLength = stoi(request.headers["Content-Length"]);
+        string bodyPart = mainBuffer.substr(headerPos + 4);
+
+        size_t contentLength = 0;
+
+        if (request.headers.count("Content-Length")) {
+            const size_t maxBodyLength = 5 * 1024 * 1024;
+            // means it contain body
+            contentLength = stoi(request.headers["Content-Length"]);
+
+            // Verify the size if greater than 5 mb reject
+            if (contentLength > maxBodyLength) {
+                // FIXME: this should be done after creating the response object reject this request
             }
 
-            if(contentLength > 0 && body.size() >= (size_t)contentLength){
-                request.body = body.substr(0, contentLength);
+            if (bodyPart.size() != contentLength) {
+                //  need to read
+
+                while (bodyPart.size() < contentLength) {
+                    char tempBuffer[8192] = {0};
+                    size_t bytesRead = read(clientSocket, tempBuffer, sizeof(tempBuffer));
+
+                    if (bytesRead <= 0) {
+                        // FIXME: reject request or break
+                        break;
+                    }
+                  
+                    bodyPart.append(tempBuffer, bytesRead);
+                }
             }
+
+            request.body = bodyPart;
+
         }
-        cout << "Printing the body ---->:" << endl;
+
+        // Printing request object to verify
+        cout << "PRINTING request object ---->" << endl;
+
+        cout << request.method << " " << request.path << endl;
+
+        for(auto it: request.headers){
+            cout << it.first << " " << it.second << endl;
+        }
 
         cout << request.body << endl;
+
     }
 
    public:
@@ -198,6 +254,7 @@ int main() {
     HTTP_SERVER app(PORT);
     globalServer = &app;
     // NOTE: you can do same programming as express and nodejs
+    // FIXME: we need to update the function argument to take request and response object as parameters
     app.get("/", [](int clientSocket) {
         // In this we can formulate the resoponse which we want to send to the browser
 
