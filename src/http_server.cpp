@@ -10,21 +10,68 @@
 #include <string>
 #include <unordered_map>
 using namespace std;
+// TODO: Date 6 oct 25
+// Learn about response object
+// Make the response object
+// connect it to the routes
 struct HTTP_Request {
     string method;
     string path;
     unordered_map<string, string> headers;  // they come after the http version
     string body;
 };
+struct HTTP_Response {
+    int statusCode;
+    string statusMsg;
+    unordered_map<string, string> headers;
+    string body;
+
+    void setStatus(int code, const string& msg) {
+        statusCode = code;
+        statusMsg = msg;
+    }
+    void setContentType(const string& type) { headers["Content-Type"] = type; }
+    void setBody(const string& b) {
+        body = b;
+        headers["Content-Length"] = to_string(body.size());
+    }
+
+    // TODO: need a function to convert this all into a valid response
+    string genResponse() {
+        string response;
+
+        // // Response will be based on the standard response procedure
+        // string response =
+        //     "HTTP/1.1 200 OK\r\n"
+        //     "Content-Type: text/plain\r\n"
+        //     "Content-Length: 12\r\n"
+        //     "\r\n"
+        //     "Hello World!";
+        // // Just send the reponse
+
+        response += "HTTP/1.1 " + to_string(statusCode) + " " + statusMsg + "\r\n";
+
+        for (auto& [key, value] : headers) {
+            response += key + ": " + value + "\r\n";
+        }
+        response += "\r\n";
+        response += body;
+
+        return response;
+    }
+};
 class HTTP_SERVER {
    private:
     int serverSocket;
     sockaddr_in serverSocketAddress;
-   // NOTE: This is how the strucutre of routes will look unordered_map<string, function<void(int, HTTP_Request&, HTTP_Response&)>> getRoutes; request should be const no change allowed
-    unordered_map<string, function<void(int)>> getRoutes;
+    // NOTE: This is how the strucutre of routes will look unordered_map<string, function<void(int,
+    // HTTP_Request&, HTTP_Response&)>> getRoutes; request should be const no change allowed
+    // unordered_map<string, function<void(int)>> getRoutes;
+    unordered_map<string, function<void(int, const HTTP_Request&, HTTP_Response&)>> getRoutes;
 
     // NOTE: Function to handle method and path of a request
-    void httpRequestParser(int clientSocket, string& method, string& path) {
+    void httpRequestParser(int clientSocket, string& method, string& path, HTTP_Request& request,
+                           HTTP_Response& response) {
         char requestBuffer[8000] = {0};
         read(clientSocket, requestBuffer, sizeof(requestBuffer));
 
@@ -47,17 +94,18 @@ class HTTP_SERVER {
                 if (bytesRead <= 0) {
                     // FIXME: if any errors comes in this we need to do something on the response
                     // object
-                    break;
+                    response.setStatus(404, "Bad Request");
+                    response.setContentType("text/plain");
+                    string res = response.genResponse();
+
+                    send(clientSocket, res.c_str(), res.size(), 0);
+                    return;
                 }
                 mainBuffer.append(tempBuffer, bytesRead);
             }
         }
         int space_count = 0;
         // NOTE: now main buffer is the string which contains all the request headers
-        // NOTE: this is testing for HTTP_REQUEST object - THIS WORKS FULLY NOW
-
-        HTTP_Request request;
-
         // NOTE: Logic for parsing the path and request method
         for (int i = 0; i < mainBuffer.size(); i++) {
             if (space_count == 0) {
@@ -136,6 +184,12 @@ class HTTP_SERVER {
             // Verify the size if greater than 5 mb reject
             if (contentLength > maxBodyLength) {
                 // FIXME: this should be done after creating the response object reject this request
+                response.setStatus(404, "Bad Request");
+                response.setContentType("text/plain");
+                string res = response.genResponse();
+
+                send(clientSocket, res.c_str(), res.size(), 0);
+                return;
             }
 
             if (bodyPart.size() != contentLength) {
@@ -147,15 +201,20 @@ class HTTP_SERVER {
 
                     if (bytesRead <= 0) {
                         // FIXME: reject request or break
-                        break;
+
+                        response.setStatus(404, "Bad Request");
+                        response.setContentType("text/plain");
+                        string res = response.genResponse();
+
+                        send(clientSocket, res.c_str(), res.size(), 0);
+                        return;
                     }
-                  
+
                     bodyPart.append(tempBuffer, bytesRead);
                 }
             }
 
             request.body = bodyPart;
-
         }
 
         // Printing request object to verify
@@ -163,12 +222,11 @@ class HTTP_SERVER {
 
         cout << request.method << " " << request.path << endl;
 
-        for(auto it: request.headers){
+        for (auto it : request.headers) {
             cout << it.first << " " << it.second << endl;
         }
 
         cout << request.body << endl;
-
     }
 
    public:
@@ -203,9 +261,11 @@ class HTTP_SERVER {
             }
 
             string method, path;
-            httpRequestParser(clientSocket, method, path);
+            HTTP_Request request;
+            HTTP_Response response;
+            httpRequestParser(clientSocket, method, path, request, response);
             if (method == "GET" && getRoutes.count(path)) {
-                getRoutes[path](clientSocket);
+                getRoutes[path](clientSocket, request, response);
             } else {
                 ifstream file("page_not_found.html");
                 if (!file) {
@@ -233,7 +293,7 @@ class HTTP_SERVER {
             close(clientSocket);
         }
     }
-    void get(const string& path, function<void(int)> handler) {
+    void get(const string& path, function<void(int, const HTTP_Request&, HTTP_Response&)> handler) {
         // key-> path/route value- function which will take clientsocket fd as argument
         getRoutes[path] = handler;
     }
@@ -254,19 +314,25 @@ int main() {
     HTTP_SERVER app(PORT);
     globalServer = &app;
     // NOTE: you can do same programming as express and nodejs
-    // FIXME: we need to update the function argument to take request and response object as parameters
-    app.get("/", [](int clientSocket) {
+    // FIXME: we need to update the function argument to take request and response object as
+    // parameters
+    app.get("/", [](int clientSocket, const HTTP_Request& request, HTTP_Response& response) {
         // In this we can formulate the resoponse which we want to send to the browser
 
-        // Response will be based on the standard response procedure
-        string response =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 12\r\n"
-            "\r\n"
-            "Hello World!";
-        // Just send the reponse
-        send(clientSocket, response.c_str(), response.size(), 0);
+        // // Response will be based on the standard response procedure
+        // string response =
+        //     "HTTP/1.1 200 OK\r\n"
+        //     "Content-Type: text/plain\r\n"
+        //     "Content-Length: 12\r\n"
+        //     "\r\n"
+        //     "Hello World!";
+        // // Just send the reponse
+        response.setStatus(200, "Ok");
+        response.setContentType("text/plain");
+        response.setBody("hello world");
+        string getResponse = response.genResponse();
+        cout << getResponse << endl;
+        send(clientSocket, getResponse.c_str(), getResponse.size(), 0);
     });
     app.run();
     app.stopServer();
