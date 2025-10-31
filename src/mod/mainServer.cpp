@@ -1,0 +1,46 @@
+// Main file for the server
+#include "HTTP_SERVER.hpp"
+#include <iostream>
+#include <signal.h>
+using namespace std;
+
+HTTP_SERVER *globalServer = nullptr;
+void signalHandler(int signum) {
+  cout << "Interupt Signal (" << signum << ")" << " recieved\n";
+  if (globalServer) {
+    globalServer->stopServer();
+  }
+  exit(signum);
+}
+int main() {
+  const int PORT = 9000;
+
+  signal(SIGINT, signalHandler);
+  HTTP_SERVER app(PORT);
+  globalServer = &app;
+  // NOTE: you can do same programming as express and nodejs
+  // FIXME: we need to update the function argument to take request and response
+  // object as parameters
+  app.get("/", [](int clientSocket, const HTTP_Request &request,
+                  HTTP_Response &response) {
+    // In this we can formulate the resoponse which we want to send to the
+    // browser
+
+    // // Response will be based on the standard response procedure
+    // string response =
+    //     "HTTP/1.1 200 OK\r\n"
+    //     "Content-Type: text/plain\r\n"
+    //     "Content-Length: 12\r\n"
+    //     "\r\n"
+    //     "Hello World!";
+    // // Just send the reponse
+    response.setStatus(200, "Ok");
+    response.setContentType("text/plain");
+    response.setBody("hello world");
+    string getResponse = response.genResponse();
+    cout << getResponse << endl;
+    send(clientSocket, getResponse.c_str(), getResponse.size(), 0);
+  });
+  app.run();
+  app.stopServer();
+}
