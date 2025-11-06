@@ -11,6 +11,8 @@ struct HTTP_Request {
   std::string path;
   std::unordered_map<std::string, std::string>
       headers; // they come after the http version
+  std::unordered_map<std::string, std::string>
+      query_params; // this is for req.query_params
   std::string body;
 };
 struct HTTP_Response {
@@ -68,6 +70,10 @@ private:
   std::unordered_map<std::string, std::function<void(int, const HTTP_Request &,
                                                      HTTP_Response &)>>
       getRoutes;
+  // postRoutes
+  std::unordered_map<std::string, std::function<void(int, const HTTP_Request &,
+                                                     HTTP_Response &)>>
+      postRoutes;
 
   // NOTE: Function to handle method and path of a request
   void httpRequestParser(int clientSocket, std::string &method,
@@ -81,5 +87,8 @@ public:
   void
   get(const std::string &path,
       std::function<void(int, const HTTP_Request &, HTTP_Response &)> handler);
+  void
+  post(const std::string &path,
+       std::function<void(int, const HTTP_Request &, HTTP_Response &)> handler);
   void stopServer();
 };

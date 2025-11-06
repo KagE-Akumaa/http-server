@@ -87,9 +87,24 @@ void HTTP_SERVER::httpRequestParser(int clientSocket, std::string &method,
   }
   request.method = method;
   request.path = path;
+  // TODO:  Pare this path into params and add that in request.query_params
+  //  /search?category=shoes&page=2 -> /search  {category = shoes, page = 2} --
+  //  need to make it like this
+  /* path will remain the same
+  map of query_params need to fill
+  */
 
   // TODO: need to make parsing logic for body and headers - DONE
 
+  // Logic to trim extra white spaces from front and back
+  auto trim = [](std::string &s) {
+    // remove leading spaces
+    while (!s.empty() && isspace(static_cast<unsigned char>(s.front())))
+      s.erase(s.begin());
+    // remove trailing spaces
+    while (!s.empty() && isspace(static_cast<unsigned char>(s.back())))
+      s.pop_back();
+  };
   std::string headerPart = mainBuffer.substr(0, headerPos);
   std::vector<std::string> str;
   std::string s = "";
@@ -123,6 +138,8 @@ void HTTP_SERVER::httpRequestParser(int clientSocket, std::string &method,
     }
 
     if (foundColon) {
+      trim(key);
+      trim(value);
       request.headers[key] = value;
     }
   }
@@ -185,6 +202,7 @@ void HTTP_SERVER::httpRequestParser(int clientSocket, std::string &method,
   }
 
   std::cout << request.body << std::endl;
+  std::cout << request.path << std::endl;
 }
 
 void HTTP_SERVER::run() {
@@ -200,8 +218,11 @@ void HTTP_SERVER::run() {
     HTTP_Request request;
     HTTP_Response response;
     httpRequestParser(clientSocket, method, path, request, response);
+
     if (method == "GET" && getRoutes.count(path)) {
       getRoutes[path](clientSocket, request, response);
+    } else if (method == "POST" && postRoutes.count(path)) {
+      postRoutes[path](clientSocket, request, response);
     } else {
       std::ifstream file("page_not_found.html");
       if (!file) {
@@ -234,5 +255,10 @@ void HTTP_SERVER::get(
   // key-> path/route value- function which will take clientsocket fd
   // as argument
   getRoutes[path] = handler;
+}
+void HTTP_SERVER::post(
+    const std::string &path,
+    std::function<void(int, const HTTP_Request &, HTTP_Response &)> handler) {
+  postRoutes[path] = handler;
 }
 void HTTP_SERVER::stopServer() { close(serverSocket); }
