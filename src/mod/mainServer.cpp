@@ -58,6 +58,7 @@ int main() {
         string pass = data["pass"];
 
         cout << "Name " << name << " password " << pass << endl;
+
         response.setStatus(200, "OK");
         response.setContentType("application/json");
         response.setBody(R"({"message": "JSON received"})");

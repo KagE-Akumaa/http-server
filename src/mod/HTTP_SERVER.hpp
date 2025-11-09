@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <iostream>
+#include <map>
 #include <netinet/in.h>
 #include <string>
 #include <sys/socket.h>
@@ -11,7 +12,7 @@ struct HTTP_Request {
   std::string path;
   std::unordered_map<std::string, std::string>
       headers; // they come after the http version
-  std::unordered_map<std::string, std::string>
+  std::map<std::string, std::string>
       query_params; // this is for req.query_params
   std::string body;
 };

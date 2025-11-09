@@ -1,7 +1,7 @@
 #include "HTTP_SERVER.hpp"
+#include "URL_Util.hpp"
 #include <fstream>
 #include <vector>
-
 HTTP_SERVER::HTTP_SERVER(int PORT) {
   serverSocket = socket(AF_INET, SOCK_STREAM, 0);
   if (serverSocket < 0) {
@@ -63,7 +63,8 @@ void HTTP_SERVER::httpRequestParser(int clientSocket, std::string &method,
   }
   int space_count = 0;
   // NOTE: now main buffer is the std::string which contains all the request
-  // headers NOTE: Logic for parsing the path and request method
+  // headers NOTE: Logic for parsing the Rawpath and request method
+  std::string rawPath;
   for (int i = 0; i < mainBuffer.size(); i++) {
     if (space_count == 0) {
       if (mainBuffer[i] == ' ') {
@@ -76,23 +77,51 @@ void HTTP_SERVER::httpRequestParser(int clientSocket, std::string &method,
         space_count++;
         break;
       }
-      path.push_back(mainBuffer[i]);
+      rawPath.push_back(mainBuffer[i]);
     } else {
       break;
     }
   }
 
-  if (path == "/favicon.ico") {
+  if (rawPath == "/favicon.ico") {
     path = "/";
   }
+  std::cout << "Raw path " << rawPath << std::endl;
   request.method = method;
-  request.path = path;
   // TODO:  Pare this path into params and add that in request.query_params
   //  /search?category=shoes&page=2 -> /search  {category = shoes, page = 2} --
   //  need to make it like this
-  /* path will remain the same
+  /* path will also change path is /search means till ? need to parse that
   map of query_params need to fill
   */
+
+  size_t idx = rawPath.find('?');
+  if (idx == std::string::npos) {
+    // no ? found rawPath is the path
+    path = rawPath;
+  } else {
+    // need to make a substing from 0 to idx-1 can append directly on path
+    for (size_t i = 0; i < idx; i++) {
+      path.push_back(rawPath[i]);
+    }
+  }
+  request.path = path;
+  // For query_params will call the function with rawPath if return false
+  // invalid request;
+
+  auto query = decodeURLCOMPONENT(rawPath);
+
+  if (!query.first) {
+    // invalid request
+    response.setStatus(400, "Bad Request");
+    response.setContentType("text/plain");
+    std::string res = response.genResponse();
+
+    send(clientSocket, res.c_str(), res.size(), 0);
+    return;
+  }
+
+  std::map<std::string, std::string> &query_params = query.second;
 
   // TODO: need to make parsing logic for body and headers - DONE
 
@@ -203,6 +232,11 @@ void HTTP_SERVER::httpRequestParser(int clientSocket, std::string &method,
 
   std::cout << request.body << std::endl;
   std::cout << request.path << std::endl;
+
+  for (auto &it : query_params) {
+    std::cout << it.first << " " << it.second << std::endl;
+  }
+  std::cout << "Raw Path" << " " << rawPath << std::endl;
 }
 
 void HTTP_SERVER::run() {
