@@ -2,6 +2,9 @@
 
 A lightweight and educational HTTP server built from scratch in **C++**.  
 This project demonstrates how to handle HTTP requests, parse URLs, and serve responses — without using any external web frameworks.
+A fully functional HTTP server built from scratch in C++ to understand how web servers process requests, handle routes, and manage connections at a low level.
+
+Currently supports GET and POST routes, with planned support for PATCH and DELETE in the upcoming version. The goal is to make it a minimal yet extendable HTTP backend framework demonstrating complete request parsing, URL utilities, and response handling.
 
 ---
 
