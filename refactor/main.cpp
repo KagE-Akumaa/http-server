@@ -228,49 +228,43 @@ class HTTP_SERVER {
 
         p.getRequestHeaders(requestHeader, req);
 
-        for (auto &it : req.headers) {
-            std::cout << it.first << " " << it.second << std::endl;
-        }
-
-        // Now comes the request body
-
-        size_t bodyStartPos = requestHeaderPos + 4;
-
         // NOTE: We can just simply get all the body first and then we can parse
         // it
-        size_t bodyPos = request.find("\r\n\r\n");
 
-        // FIX: Bug in this -> not printing the body
-        if (req.headers.find("Content-Length") != req.headers.end()) {
-            // NEED TO read again until buffer size is == content-length
-            std::string bodyBuffer;
-            std::vector<char> buf(8000, 0);
-            while (bodyBuffer.size() <
-                   std::stoi(req.headers["Content-Length"])) {
+        // Now comes the request body only if content-length exits
+        if (req.headers.find("content-length") != req.headers.end()) {
+            // NOTE: We might have read some of the body after '\r\n\r\n'
+            // Remember to add 4 bytes for the \r\n\r\n :)
+            std::string bodyBuffer = request.substr(requestHeaderPos + 4);
 
-                ssize_t bRead = read(clientFd.fd, buf.data(), buf.size());
+            // FIX: Remove these magic numbers once this works :)
+            std::vector<char> buff(8000, 0);
+            int clength = std::stoi(req.headers["content-length"]);
+            while (bodyBuffer.size() < clength) {
 
-                if (bRead == 0) {
+                ssize_t bread = read(clientFd.fd, buff.data(), buff.size());
+
+                if (bread == 0) {
                     break;
                 }
 
-                if (bRead == -1) {
-                    std::cerr << "Failed reading the http body "
+                if (bread == -1) {
+                    std::cerr << "Failed reading http body"
                               << std::strerror(errno);
-                    return;
                 }
 
-                // We got bytesRead - append them to req.body
-                bodyBuffer.append(buf.begin(), buf.begin() + bRead);
+                // We have bytes read - append them
+                bodyBuffer.append(buff.begin(), buff.begin() + bread);
             }
-            req.body = bodyBuffer;
 
-            std::cout << "bodyBuffer" << std::endl;
-            std::cout << bodyBuffer << std::endl;
+            req.body = bodyBuffer;
         }
 
         // FIX: This function is just for debugging purposes -> delete later
         debug(req);
+
+        std::cout << req.body.size() << std::endl;
+        std::cout << req.headers["content-length"] << std::endl;
 
         send(clientFd.fd, tempResponse.c_str(), tempResponse.size(), 0);
     }
