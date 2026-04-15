@@ -1,0 +1,30 @@
+[
+  {
+    "file": "main.cpp",
+    "arguments": [
+      "g++",
+      "-std=c++17",
+      "-Wall",
+      "-I./include",
+      "-o",
+      "server",
+      "main.cpp"
+    ],
+    "directory": "/home/akumaa/Personal/Projects/http-server/refactor",
+    "output": "server"
+  },
+  {
+    "file": "src/Router.cpp",
+    "arguments": [
+      "g++",
+      "-std=c++17",
+      "-Wall",
+      "-I./include",
+      "-o",
+      "server",
+      "src/Router.cpp"
+    ],
+    "directory": "/home/akumaa/Personal/Projects/http-server/refactor",
+    "output": "server"
+  }
+]
