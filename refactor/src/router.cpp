@@ -1,4 +1,5 @@
 #include "router.hpp"
+// NOTE: Remember the Request method is not lowercased
 
 // NOTE: This function -> matches the correct route for the routehandler
 void Router::match(const Request &req, Response &res) {
@@ -10,20 +11,21 @@ void Router::match(const Request &req, Response &res) {
             fn(req, res);
         };
 
-    if (req.method == "get") {
+    if (req.method == "GET") {
         if (getRoutes.find(path) != getRoutes.end()) {
             // Means we found the match
             dispatcher(getRoutes[path]);
+        } else {
         }
         // FIX: return after giving a valid Response
-        return;
-    } else if (req.method == "post") {
+        // return;
+    } else if (req.method == "POST") {
         if (postRoutes.find(path) != postRoutes.end()) {
             // Means we found the match
             dispatcher(postRoutes[path]);
         }
         // FIX: return after giving a valid Response
-        return;
+        // return;
     }
 }
 
