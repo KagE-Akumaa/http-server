@@ -203,7 +203,10 @@ void HTTP_SERVER::connectionHandler(ClientSocket clientFd) {
     std::cout << req.headers["content-length"] << std::endl;
 
     r.match(req, res);
-    send(clientFd.getFd(), tempResponse.c_str(), tempResponse.size(), 0);
+
+    res.version = req.version;
+    std::string finalResponse = responseSerialization(res);
+    send(clientFd.getFd(), finalResponse.c_str(), finalResponse.size(), 0);
 }
 
 void HTTP_SERVER::run() {
@@ -244,4 +247,39 @@ void HTTP_SERVER::run() {
         });
         t.detach();
     }
+}
+
+std::string HTTP_SERVER::responseSerialization(Response &res) {
+    // NOTE: This function will check the status codes and will take the filled
+    // value from route handler and is responsible to form a valid http-response
+    // object before sending
+    std::unordered_map<int, std::string> statusMap = {
+        {200, "OK"},           {201, "Created"},
+        {204, "No Content"},   {400, "Bad Request"},
+        {401, "Unauthorized"}, {403, "Forbidden"},
+        {404, "Not Found"},    {500, "Internal Server Error"},
+        {502, "Bad Gateway"},  {503, "Service Unavailable"}};
+
+    if (statusMap.find(res.statusCode) != statusMap.end()) {
+        res.message = statusMap[res.statusCode];
+    } else {
+        res.message = statusMap[500];
+    }
+
+    auto generateResponse = [&]() -> std::string {
+        std::string response;
+
+        response += res.version + " " + std::to_string(res.statusCode) + " " +
+                    res.message + "\r\n";
+
+        for (auto &[key, value] : res.headers) {
+            response += key + ": " + value + "\r\n";
+        }
+        response += "\r\n";
+
+        response += res.body;
+
+        return response;
+    };
+    return generateResponse();
 }

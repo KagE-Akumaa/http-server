@@ -18,4 +18,6 @@ class HTTP_SERVER {
     void run();
 
     void connectionHandler(ClientSocket clientFd);
+
+    std::string responseSerialization(Response &res);
 };
