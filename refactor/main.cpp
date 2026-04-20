@@ -1,12 +1,11 @@
 #include "Http_Server.hpp"
 #include "router.hpp"
-#include <iostream>
 
 int main() {
     int port = 8989;
     Router myRouter;
     myRouter.get("/", [](const Request &req, Response &res) {
-        res.status(900);
+        res.status(200);
         res.setContentType("application/json");
 
         res.setBody(R"({

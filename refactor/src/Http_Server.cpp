@@ -187,6 +187,7 @@ void HTTP_SERVER::connectionHandler(ClientSocket clientFd) {
 
             if (bread == -1) {
                 std::cerr << "Failed reading http body" << std::strerror(errno);
+                return;
             }
 
             // We have bytes read - append them
@@ -249,11 +250,12 @@ void HTTP_SERVER::run() {
     }
 }
 
+// NOTE: This function will check the status codes and will take the filled
+// value from route handler and is responsible to form a valid http-response
+// object before sending
 std::string HTTP_SERVER::responseSerialization(Response &res) {
-    // NOTE: This function will check the status codes and will take the filled
-    // value from route handler and is responsible to form a valid http-response
-    // object before sending
-    std::unordered_map<int, std::string> statusMap = {
+    // NOTE: Made this static as we don't need it to spawn for every thread
+    static std::unordered_map<int, std::string> statusMap = {
         {200, "OK"},           {201, "Created"},
         {204, "No Content"},   {400, "Bad Request"},
         {401, "Unauthorized"}, {403, "Forbidden"},
