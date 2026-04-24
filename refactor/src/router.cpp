@@ -77,10 +77,9 @@ void staticFileHandler(const Request &req, Response &res) {
     }
 
     auto data = readFile(temp);
-    std::string body(data.begin(), data.end());
     file.close();
     res.status(200);
-    res.setBody(body);
+    res.setBody(data);
 }
 // NOTE: This function -> matches the correct route for the routehandler
 void Router::match(const Request &req, Response &res) {
