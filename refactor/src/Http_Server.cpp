@@ -89,13 +89,6 @@ void HTTP_SERVER::connectionHandler(ClientSocket clientFd) {
     std::string request;
     std::vector<char> requestBuffer(8000, 0);
 
-    // FIX: This is a temporary response string delete this->
-    std::string tempResponse = "HTTP/1.1 200 OK\r\n"
-                               "Content-Type: text/html\r\n"
-                               "Content-Length: 13\r\n"
-                               "Connection: close\r\n"
-                               "\r\n"
-                               "Hello, world!";
     while (true) {
         // NOTE: First we need a buffer to store the http-request size -
         // 8kb
@@ -271,17 +264,41 @@ std::string HTTP_SERVER::responseSerialization(Response &res) {
     auto generateResponse = [&]() -> std::string {
         std::string response;
 
-        response += res.version + " " + std::to_string(res.statusCode) + " " +
-                    res.message + "\r\n";
+        // NOTE: we can check the type of res.body if it's vector<char> need to
+        // handle that
+        if (!res.body.empty()) {
+            // true
+            response += res.version + " " + std::to_string(res.statusCode) +
+                        " " + res.message + "\r\n";
 
-        for (auto &[key, value] : res.headers) {
-            response += key + ": " + value + "\r\n";
+            for (auto &[key, value] : res.headers) {
+                response += key + ": " + value + "\r\n";
+            }
+            response += "\r\n";
+
+            std::cout << "this is in generateResponse" << std::endl;
+            std::cout << res.body << std::endl;
+
+            response += res.body;
+
+            return response;
+        } else {
+            response += res.version + " " + std::to_string(res.statusCode) +
+                        " " + res.message + "\r\n";
+
+            for (auto &[key, value] : res.headers) {
+                response += key + ": " + value + "\r\n";
+            }
+            response += "\r\n";
+
+            std::cout << "this is in generateResponse" << std::endl;
+            std::cout << res.body << std::endl;
+
+            std::string temp(res.bodyBytes.begin(), res.bodyBytes.end());
+            response += temp;
+
+            return response;
         }
-        response += "\r\n";
-
-        response += res.body;
-
-        return response;
     };
     return generateResponse();
 }

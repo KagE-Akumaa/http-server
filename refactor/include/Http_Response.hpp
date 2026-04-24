@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 class Response {
     // NOTE: These three are the status line
     std::string version;
@@ -13,6 +14,8 @@ class Response {
 
     // NOTE: This is the Response body
     std::string body;
+    // NOTE: This is for raw bytes like images
+    std::vector<char> bodyBytes;
 
     void send();
 
@@ -22,6 +25,8 @@ class Response {
     void status(int statusCode);
 
     void setBody(const std::string &body);
+
+    void setBody(const std::vector<char> &bodyBytes);
 
     void setContentType(const std::string &type);
 
