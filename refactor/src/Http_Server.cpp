@@ -276,9 +276,6 @@ std::string HTTP_SERVER::responseSerialization(Response &res) {
             }
             response += "\r\n";
 
-            std::cout << "this is in generateResponse" << std::endl;
-            std::cout << res.body << std::endl;
-
             response += res.body;
 
             return response;
@@ -290,9 +287,6 @@ std::string HTTP_SERVER::responseSerialization(Response &res) {
                 response += key + ": " + value + "\r\n";
             }
             response += "\r\n";
-
-            std::cout << "this is in generateResponse" << std::endl;
-            std::cout << res.body << std::endl;
 
             std::string temp(res.bodyBytes.begin(), res.bodyBytes.end());
             response += temp;
