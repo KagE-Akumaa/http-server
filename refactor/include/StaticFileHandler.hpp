@@ -1,5 +1,6 @@
 
 #pragma once
+#include "Http_Response.hpp"
 #include <filesystem>
 class StaticFileHandler {
   public:
@@ -7,5 +8,5 @@ class StaticFileHandler {
 
     StaticFileHandler(std::filesystem::path root);
 
-    void HandleUserRequest(std::string &path);
+    Response HandleUserRequest(std::string &path, Response &res);
 };
