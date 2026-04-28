@@ -1,107 +1,198 @@
-# ⚡ HTTP Server in C++
+# cpp-http-server
 
-A lightweight and educational HTTP server built from scratch in **C++**.  
-This project demonstrates how to handle HTTP requests, parse URLs, and serve responses — without using any external web frameworks.
-A fully functional HTTP server built from scratch in C++ to understand how web servers process requests, handle routes, and manage connections at a low level.
-
-Currently supports GET and POST routes, with planned support for PATCH and DELETE in the upcoming version. The goal is to make it a minimal yet extendable HTTP backend framework demonstrating complete request parsing, URL utilities, and response handling.
+A modular HTTP/1.1 server built from scratch in modern C++, using raw POSIX socket APIs. Built to understand how HTTP actually works at the systems level — TCP behavior, partial reads, path security, binary I/O, and clean component design.
 
 ---
 
-## 🚀 Features
+## Features
 
-- Built completely in **C++**
-- Custom **HTTP request parsing**
-- Basic **URL encoding/decoding utilities**
-- Lightweight **server core** using sockets
-- Organized modular structure (`mainServer`, `HTTP_SERVER`, `URL_Util`)
-- Easy compilation via `Makefile`
+**Core**
+- TCP server over POSIX sockets (`socket`, `bind`, `accept`, `read`/`write`)
+- Thread-per-connection model — each client gets its own `std::thread`
+- RAII socket management — no manual cleanup, no leaked file descriptors
+
+**HTTP Parsing**
+- Parses request line, headers, and body
+- Handles `Content-Length` for body reads
+- Correctly handles **partial TCP reads** — accumulates data across `read()` calls and detects `\r\n\r\n` on the full buffer
+
+**Routing**
+- `GET` and `POST` route registration
+- Express-style lambda handlers: `router.get("/path", handler)`
+- Clean separation between route matching and handler logic
+
+**Static File Serving**
+- Serves files from a configured root directory
+- Prevents **directory traversal attacks** (`../../etc/passwd`)
+- Prevents **prefix attacks** (`/public_malicious`)
+- Guards against **symlink escapes**
+- Canonical path validation via `std::filesystem::weakly_canonical`
+
+**MIME Resolution**
+- File extension → `Content-Type` mapping
+- Fallback to `application/octet-stream` for unknown types
+
+**Binary-Safe I/O**
+- Files read and transmitted as raw bytes — images, fonts, and binary assets served correctly
 
 ---
 
-## 🧩 Project Structure
+## Project Structure
 
 ```
-├── mainServer.cpp      # Entry point, starts the HTTP server
-├── HTTP_SERVER.cpp     # Core server logic (socket creation, handling, parsing)
-├── URL_Util.cpp        # Utility for URL encoding/decoding
-├── Makefile            # Build automation
-└── README.md           # Project documentation
+.
+├── include/
+│   ├── Http_Server.hpp       # Server lifecycle, socket setup, connection dispatch
+│   ├── Router.hpp            # Route registration and matching
+│   ├── Http_Parser.hpp       # Incremental HTTP request parser
+│   ├── StaticFileHandler.hpp # Secure static file serving
+│   ├── MimeResolver.hpp      # Extension → Content-Type mapping
+│   ├── FileReader.hpp        # Binary-safe file I/O
+│   ├── Http_Request.hpp      # Parsed request struct
+│   └── Http_Response.hpp     # Response builder
+│
+├── src/
+│   ├── Http_Server.cpp
+│   ├── Router.cpp
+│   ├── Http_Parser.cpp
+│   ├── StaticFileHandler.cpp
+│   ├── MimeResolver.cpp
+│   └── FileReader.cpp
+│
+├── assets/                   # Static content served by the server
+│   ├── images/
+│   │   └── anime-bg.png
+│   └── 404.html              # Custom not-found page
+└── main.cpp
 ```
 
 ---
 
-## ⚙️ Build Instructions
+## Architecture
 
-### 🔧 Prerequisites
-- C++ compiler (e.g., `g++`)
-- Linux/Unix system (tested on Ubuntu)
+```
+Client → HTTP_SERVER → HTTP_Parser → Router → Handler
+                                            ↓
+                               StaticFileHandler / API Handler
+                                            ↓
+                                      HTTP_Response
+```
 
-### 🏗️ Build the Project
-Clone the repository:
+Each incoming connection is dispatched to a new thread. The parser accumulates raw bytes until `\r\n\r\n` is detected, then parses headers and reads the body if `Content-Length` is set. The router matches the method and path, and invokes the registered handler.
+
+---
+
+## Building
+
 ```bash
-git clone https://github.com/KagE-Akumaa/http-server.git
-cd http-server
-```
-
-Compile the source:
-```bash
+git clone https://github.com/KagE-Akumaa/cpp-http-server
+cd cpp-http-server
 make
-```
-
-This will generate an executable named:
-```
-server
-```
-
----
-
-## ▶️ Run the Server
-
-To start the server:
-```bash
 ./server
 ```
 
-By default, it will:
-- Initialize a socket
-- Listen for incoming HTTP requests
-- Parse and respond based on implemented routes
+Server starts on `http://localhost:8989`.
+
+> Requires a C++17-capable compiler, `make`, and a POSIX-compliant OS (Linux/macOS).
 
 ---
 
-## 🧹 Clean Build Files
+## Usage
+
+### Defining Routes
+
+```cpp
+router.get("/", [](const Http_Request& req, Http_Response& res) {
+    res.status(200).json(R"({"users":[{"id":1,"name":"Mukul"}]})");
+});
+
+router.post("/", [](const Http_Request& req, Http_Response& res) {
+    res.status(201).json(R"({"message":"created"})");
+});
+```
+
+### Static Files
+
+Files under `assets/` are served automatically:
+
+```
+GET /images/anime-bg.png  →  assets/images/anime-bg.png
+```
+
+---
+
+## Testing
+
 ```bash
-make clean
-```
-This removes the compiled binary:
-```
-rm -f server
+# Basic GET
+curl http://localhost:8989/
+
+# POST with JSON body
+curl -X POST http://localhost:8989 \
+     -H "Content-Type: application/json" \
+     -d '{"name":"test","email":"test@example.com"}'
+
+# Static file
+curl http://localhost:8989/images/anime-bg.png
+
+# 404
+curl http://localhost:8989/unknown
+
+# Directory traversal attempt (should be rejected)
+curl http://localhost:8989/../../../etc/passwd
 ```
 
 ---
 
-## 💡 Example Output
-```
-[INFO] Server started on port 8080
-[INFO] Waiting for client connection...
-[REQUEST] GET /?name=test HTTP/1.1
-[RESPONSE] 200 OK
-```
+## Security
+
+This project explicitly addresses common HTTP server vulnerabilities:
+
+| Attack | Mitigation |
+|---|---|
+| Directory traversal (`../../etc/passwd`) | `weakly_canonical` + root containment check |
+| Prefix attack (`/public_malicious`) | Component-wise path comparison, not string prefix |
+| Symlink escape | Canonical resolution follows symlinks before validation |
+
+String-based path matching is intentionally avoided — path components are resolved and compared, not searched for substrings.
 
 ---
 
-## 🧠 Future Improvements
-- Add support for multiple routes (e.g., `/api`, `/status`)
-- Add logging and configuration support
+## Design Decisions
+
+**Why thread-per-connection?**  
+Simple to reason about and sufficient for a learning/demo context. The tradeoff is that it doesn't scale past a few hundred concurrent connections — a thread pool or `epoll`-based event loop would be the next step.
+
+**Why RAII for sockets?**  
+File descriptors are resources. Wrapping them in a class with a destructor ensures they're closed on any exit path — including exceptions — without needing explicit cleanup in every code path.
+
+**Why `weakly_canonical` over `canonical`?**  
+`std::filesystem::canonical` throws if the path doesn't exist. `weakly_canonical` resolves symlinks for existing components only, which is the right behavior when serving files that may or may not exist (produces a clean 404 rather than an exception).
 
 ---
 
-## 🧑‍💻 Author
-**Mukul Jogi**  
-Built as part of a personal backend learning journey in C++.
+## Roadmap
+
+- [ ] Keep-alive connections (persistent `recv_buffer` per connection, multi-request loop)
+- [ ] Thread pool (bounded concurrency, task queue)
+- [ ] `epoll`-based async I/O
+- [ ] Incremental streaming parser (state machine — eliminates double-buffering)
+- [ ] Full HTTP/1.1 compliance (`Transfer-Encoding: chunked`, etc.)
+- [ ] Structured logging
+- [ ] Unit tests (GoogleTest or Catch2)
 
 ---
 
-## 📜 License
-This project is open-source under the **MIT License**.
+## Key Takeaways
+
+- TCP delivers a **stream, not messages** — partial reads are the norm, not an edge case
+- String prefix matching for paths is a security vulnerability, not a shortcut
+- Binary vs text mode matters — opening a file in text mode corrupts images
+- RAII is not optional in systems code — any manual `close()` is a potential leak
+- Separation of concerns (parser / router / handler) makes each component independently testable
+
+---
+
+## License
+
+MIT
