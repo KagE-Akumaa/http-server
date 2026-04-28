@@ -1,4 +1,4 @@
-# cpp-http-server
+# http-server
 
 A modular HTTP/1.1 server built from scratch in modern C++, using raw POSIX socket APIs. Built to understand how HTTP actually works at the systems level — TCP behavior, partial reads, path security, binary I/O, and clean component design.
 
@@ -85,8 +85,8 @@ Each incoming connection is dispatched to a new thread. The parser accumulates r
 ## Building
 
 ```bash
-git clone https://github.com/KagE-Akumaa/cpp-http-server
-cd cpp-http-server
+git clone https://github.com/KagE-Akumaa/http-server
+cd http-server
 make
 ./server
 ```
