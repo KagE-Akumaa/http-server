@@ -5,7 +5,9 @@
 using json = nlohmann::json;
 int main() {
     int port = 8989;
-    Router myRouter;
+    // NOTE: Now we need to pass the root directory to handle the static files
+    Router myRouter(
+        "/home/akumaa/Personal/Projects/http-server/refactor/assets");
     myRouter.get("/", [](const Request &req, Response &res) {
         res.status(200);
         res.setContentType("application/json");

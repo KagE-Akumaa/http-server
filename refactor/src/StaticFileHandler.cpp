@@ -1,5 +1,7 @@
 
 #include "StaticFileHandler.hpp"
+#include "FileReader.hpp"
+#include "MimeResolver.hpp"
 #include <iostream>
 
 bool insideRoot(std::filesystem::path &root,
@@ -64,19 +66,40 @@ Response StaticFileHandler::HandleUserRequest(std::string &userPath,
     if (!insideRoot(root, resolvedPath)) {
         // return 404 response
         std::cerr << "INVALID PATH" << std::endl;
-        res.status(404);
         // NOTE: We need to serve the 404 page too.
+        res.status(404);
+        std::filesystem::path path = root / "404.html";
+        std::vector<char> body = fileReader(path);
+        res.setBody(body);
+        MimeResolver mime;
+
+        std::string type = mime.getMimeType(path);
+        res.setContentType(type);
         return res;
     }
 
     // Step - 5 We need to check if the file exists then give the file
     if (std::filesystem::exists(resolvedPath)) {
         // We return the file
+        res.status(200);
+        std::vector<char> body = fileReader(resolvedPath);
+        res.setBody(body);
+        MimeResolver mime;
+
+        std::string type = mime.getMimeType(resolvedPath);
+        res.setContentType(type);
         std::cout << "File returned successfully" << std::endl;
         return res;
     }
 
     std::cout << "File does not exists" << std::endl;
+    res.status(404);
+    std::filesystem::path path1 = root / "404.html";
+    std::vector<char> body = fileReader(path1);
+    res.setBody(body);
+    MimeResolver mime;
 
+    std::string type = mime.getMimeType(path1);
+    res.setContentType(type);
     return res;
 }

@@ -14,10 +14,11 @@ const std::unordered_map<std::string, std::string> MimeResolver::mimeMap = {
     {"gif", "image/gif"},
     {"svg", "image/svg+xml"},
     {"txt", "text/plain"}};
-//"/home/akumaa/test/server/public/images/logo.png";
+
 // NOTE: This functon will return the mime type for a filePath
 
-std::string MimeResolver::getMimeType(std::filesystem::path &filePath) const {
+std::string
+MimeResolver::getMimeType(const std::filesystem::path &filePath) const {
 
     std::cout << filePath << std::endl;
 

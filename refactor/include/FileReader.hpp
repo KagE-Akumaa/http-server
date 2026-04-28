@@ -6,4 +6,4 @@
 #include <vector>
 
 // NOTE: Accepts the File path and return the bytes read
-std::vector<char> fileReader(std::filesystem::path &filePath);
+std::vector<char> fileReader(const std::filesystem::path &filePath);
