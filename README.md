@@ -86,7 +86,7 @@ Each incoming connection is dispatched to a new thread. The parser accumulates r
 
 ```bash
 git clone https://github.com/KagE-Akumaa/http-server
-cd http-server
+cd http-server/refactor
 make
 ./server
 ```
