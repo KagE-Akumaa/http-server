@@ -10,5 +10,5 @@ class MimeResolver {
     static const std::unordered_map<std::string, std::string> mimeMap;
 
   public:
-    std::string getMimeType(std::filesystem::path &filePath) const;
+    std::string getMimeType(const std::filesystem::path &filePath) const;
 };

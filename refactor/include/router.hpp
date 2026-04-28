@@ -3,6 +3,7 @@
 // ANS: To match the route with correct route handler.
 #include "Http_Request.hpp"
 #include "Http_Response.hpp"
+#include "StaticFileHandler.hpp"
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -14,8 +15,10 @@ class Router {
     std::vector<Middleware> middle;
     std::unordered_map<std::string, RouteHandler> getRoutes;
     std::unordered_map<std::string, RouteHandler> postRoutes;
+    StaticFileHandler staticHandler;
 
   public:
+    Router(const std::filesystem::path &root);
     void get(const std::string &path, RouteHandler);
     void post(const std::string &path, RouteHandler);
     void use(const Middleware);

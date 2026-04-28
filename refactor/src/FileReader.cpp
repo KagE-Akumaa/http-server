@@ -2,7 +2,7 @@
 #include "fstream"
 #include <iostream>
 
-std::vector<char> fileReader(std::filesystem::path &filePath) {
+std::vector<char> fileReader(const std::filesystem::path &filePath) {
 
     // 1. Open the file in binary mode
     std::ifstream file(filePath, std::ios::binary);
