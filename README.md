@@ -1,198 +1,137 @@
 # http-server
 
-A modular HTTP/1.1 server built from scratch in modern C++, using raw POSIX socket APIs. Built to understand how HTTP actually works at the systems level — TCP behavior, partial reads, path security, binary I/O, and clean component design.
+A small, educational HTTP server written in C++20 with POSIX sockets. It listens on port `8989`, accepts TCP connections, parses one HTTP request per connection, dispatches simple `GET` and `POST` routes, and falls back to serving files from `assets/`.
 
----
+The executable currently exposes a small JSON API at `/` and serves the bundled image and `404.html` page as static content. It is a learning project, not a production web server.
 
-## Features
+## What it does
 
-**Core**
-- TCP server over POSIX sockets (`socket`, `bind`, `accept`, `read`/`write`)
-- Thread-per-connection model — each client gets its own `std::thread`
-- RAII socket management — no manual cleanup, no leaked file descriptors
-
-**HTTP Parsing**
-- Parses request line, headers, and body
-- Handles `Content-Length` for body reads
-- Correctly handles **partial TCP reads** — accumulates data across `read()` calls and detects `\r\n\r\n` on the full buffer
-
-**Routing**
-- `GET` and `POST` route registration
-- Express-style lambda handlers: `router.get("/path", handler)`
-- Clean separation between route matching and handler logic
-
-**Static File Serving**
-- Serves files from a configured root directory
-- Prevents **directory traversal attacks** (`../../etc/passwd`)
-- Prevents **prefix attacks** (`/public_malicious`)
-- Guards against **symlink escapes**
-- Canonical path validation via `std::filesystem::weakly_canonical`
-
-**MIME Resolution**
-- File extension → `Content-Type` mapping
-- Fallback to `application/octet-stream` for unknown types
-
-**Binary-Safe I/O**
-- Files read and transmitted as raw bytes — images, fonts, and binary assets served correctly
-
----
-
-## Project Structure
-
-```
-.
-├── include/
-│   ├── Http_Server.hpp       # Server lifecycle, socket setup, connection dispatch
-│   ├── Router.hpp            # Route registration and matching
-│   ├── Http_Parser.hpp       # Incremental HTTP request parser
-│   ├── StaticFileHandler.hpp # Secure static file serving
-│   ├── MimeResolver.hpp      # Extension → Content-Type mapping
-│   ├── FileReader.hpp        # Binary-safe file I/O
-│   ├── Http_Request.hpp      # Parsed request struct
-│   └── Http_Response.hpp     # Response builder
-│
-├── src/
-│   ├── Http_Server.cpp
-│   ├── Router.cpp
-│   ├── Http_Parser.cpp
-│   ├── StaticFileHandler.cpp
-│   ├── MimeResolver.cpp
-│   └── FileReader.cpp
-│
-├── assets/                   # Static content served by the server
-│   ├── images/
-│   │   └── anime-bg.png
-│   └── 404.html              # Custom not-found page
-└── main.cpp
-```
-
----
+- Opens a TCP listening socket with `SO_REUSEADDR` and a listen backlog of 10.
+- Creates a detached `std::thread` for each accepted client.
+- Parses an HTTP request line, headers, and a request body when `Content-Length` is present.
+- Registers exact-match `GET` and `POST` handlers.
+- Serves unmatched `GET` and `POST` paths from the configured static root.
+- Reads files in binary mode and resolves common MIME types.
+- Uses canonical filesystem paths to reject requests that resolve outside the static root, including traversal and symlink escapes.
+- Returns `assets/404.html` when a requested static file is missing or rejected.
 
 ## Architecture
 
-```
-Client → HTTP_SERVER → HTTP_Parser → Router → Handler
-                                            ↓
-                               StaticFileHandler / API Handler
-                                            ↓
-                                      HTTP_Response
-```
-
-Each incoming connection is dispatched to a new thread. The parser accumulates raw bytes until `\r\n\r\n` is detected, then parses headers and reads the body if `Content-Length` is set. The router matches the method and path, and invokes the registered handler.
-
----
-
-## Building
-
-```bash
-git clone https://github.com/KagE-Akumaa/http-server
-cd http-server/refactor
-make
-./server
+```mermaid
+flowchart LR
+    C[HTTP client] -->|TCP connection| L[HTTP_SERVER\nlisten / accept]
+    L -->|one detached thread| H[connectionHandler]
+    H --> P[Parser\nrequest line + headers + body]
+    P --> R[Router]
+    R -->|exact GET or POST match| A[Route handler]
+    R -->|no route match| S[StaticFileHandler]
+    S --> F[FileReader + MimeResolver]
+    A --> O[Response]
+    F --> O
+    O --> X[Response serialization]
+    X --> C
 ```
 
-Server starts on `http://localhost:8989`.
+### Request handling
 
-> Requires a C++17-capable compiler, `make`, and a POSIX-compliant OS (Linux/macOS).
-
----
-
-## Usage
-
-### Defining Routes
-
-```cpp
-router.get("/", [](const Http_Request& req, Http_Response& res) {
-    res.status(200).json(R"({"users":[{"id":1,"name":"Mukul"}]})");
-});
-
-router.post("/", [](const Http_Request& req, Http_Response& res) {
-    res.status(201).json(R"({"message":"created"})");
-});
+```text
+request bytes
+    -> read until the header terminator is found
+    -> parse request line and headers
+    -> if Content-Length is present, read the remaining body bytes
+    -> route or serve a static file
+    -> serialize one HTTP response and close the client socket
 ```
 
-### Static Files
+## Included endpoints
 
-Files under `assets/` are served automatically:
-
-```
-GET /images/anime-bg.png  →  assets/images/anime-bg.png
-```
-
----
-
-## Testing
-
-```bash
-# Basic GET
-curl http://localhost:8989/
-
-# POST with JSON body
-curl -X POST http://localhost:8989 \
-     -H "Content-Type: application/json" \
-     -d '{"name":"test","email":"test@example.com"}'
-
-# Static file
-curl http://localhost:8989/images/anime-bg.png
-
-# 404
-curl http://localhost:8989/unknown
-
-# Directory traversal attempt (should be rejected)
-curl http://localhost:8989/../../../etc/passwd
-```
-
----
-
-## Security
-
-This project explicitly addresses common HTTP server vulnerabilities:
-
-| Attack | Mitigation |
+| Request | Behavior |
 |---|---|
-| Directory traversal (`../../etc/passwd`) | `weakly_canonical` + root containment check |
-| Prefix attack (`/public_malicious`) | Component-wise path comparison, not string prefix |
-| Symlink escape | Canonical resolution follows symlinks before validation |
+| `GET /` | Returns a hard-coded JSON array of three users. |
+| `POST /` with `Content-Type: application/json` | Parses JSON and returns `200` with `{"message" : "JSON recieved"}`. |
+| `POST /` with malformed JSON | Returns `400` with an error JSON body. |
+| `GET /images/anime-bg.png` | Serves the bundled PNG from `assets/images/`. |
+| Unknown/static path | Returns the custom `assets/404.html` page with `404`. |
 
-String-based path matching is intentionally avoided — path components are resolved and compared, not searched for substrings.
+Static files are not registered individually: an unmatched route is mapped below the static root.
 
----
+## Build
 
-## Design Decisions
+Requirements:
 
-**Why thread-per-connection?**  
-Simple to reason about and sufficient for a learning/demo context. The tradeoff is that it doesn't scale past a few hundred concurrent connections — a thread pool or `epoll`-based event loop would be the next step.
+- A POSIX-compatible system (the server uses POSIX socket APIs).
+- CMake 3.20 or newer.
+- A C++20-capable compiler.
 
-**Why RAII for sockets?**  
-File descriptors are resources. Wrapping them in a class with a destructor ensures they're closed on any exit path — including exceptions — without needing explicit cleanup in every code path.
+```bash
+cmake -S . -B build
+cmake --build build
+./build/http-server
+```
 
-**Why `weakly_canonical` over `canonical`?**  
-`std::filesystem::canonical` throws if the path doesn't exist. `weakly_canonical` resolves symlinks for existing components only, which is the right behavior when serving files that may or may not exist (produces a clean 404 rather than an exception).
+The server listens on `http://127.0.0.1:8989` (on all local interfaces via `INADDR_ANY`).
 
----
+> **Current configuration note:** `src/main.cpp` hard-codes the static directory as `/home/akumaa/Projects/http-server/assets`. If you clone the project elsewhere, update that path before running the executable.
 
-## Roadmap
+## Try it
 
-- [ ] Keep-alive connections (persistent `recv_buffer` per connection, multi-request loop)
-- [ ] Thread pool (bounded concurrency, task queue)
-- [ ] `epoll`-based async I/O
-- [ ] Incremental streaming parser (state machine — eliminates double-buffering)
-- [ ] Full HTTP/1.1 compliance (`Transfer-Encoding: chunked`, etc.)
-- [ ] Structured logging
-- [ ] Unit tests (GoogleTest or Catch2)
+```bash
+# JSON route
+curl -i http://127.0.0.1:8989/
 
----
+# Valid JSON POST
+curl -i -X POST http://127.0.0.1:8989/ \
+  -H 'Content-Type: application/json' \
+  --data '{"name":"test","email":"test@example.com"}'
 
-## Key Takeaways
+# Static asset
+curl -sS -D - http://127.0.0.1:8989/images/anime-bg.png -o /dev/null
 
-- TCP delivers a **stream, not messages** — partial reads are the norm, not an edge case
-- String prefix matching for paths is a security vulnerability, not a shortcut
-- Binary vs text mode matters — opening a file in text mode corrupts images
-- RAII is not optional in systems code — any manual `close()` is a potential leak
-- Separation of concerns (parser / router / handler) makes each component independently testable
+# Missing resource
+curl -i http://127.0.0.1:8989/does-not-exist
+```
 
----
+## Project layout
 
-## License
+```text
+.
+├── assets/                    # Static files and custom 404 page
+├── include/                   # Public declarations for server components
+├── src/
+│   ├── main.cpp               # Routes, port, and static-root setup
+│   ├── Http_Server.cpp        # Socket lifecycle and connection handling
+│   ├── Http_Parser.cpp        # Request-line and header parsing
+│   ├── router.cpp             # Exact route dispatch and static fallback
+│   ├── StaticFileHandler.cpp  # Static-root validation and file responses
+│   ├── FileReader.cpp         # Binary file reads
+│   ├── MimeResolver.cpp       # File extension to MIME type mapping
+│   └── Http_Response.cpp      # Response-body and header helpers
+├── CMakeLists.txt
+└── README.md
+```
 
-MIT
+## Static-file safety
+
+The static-file handler removes leading slashes, joins the requested path to the configured root, then uses `std::filesystem::weakly_canonical`. It compares path components—not string prefixes—to ensure the resolved file remains within the canonical static root. This prevents `..` traversal, similarly prefixed directories, and symlinks that escape the root.
+
+## Current limitations
+
+These are implementation constraints worth knowing before using the project beyond experimentation:
+
+- It serves one request per connection; keep-alive and pipelined requests are not supported.
+- It uses unbounded detached threads, so it is not suited to high concurrency.
+- It supports only the implemented `GET` and `POST` routing paths; unsupported methods do not receive a deliberate `405 Method Not Allowed` response.
+- It does not implement chunked transfer encoding, request-size limits, timeouts, TLS, or comprehensive HTTP/1.1 validation.
+- Header values are converted to lowercase during parsing, which is convenient for the current content-type check but is not correct for every HTTP header value.
+- A header delimiter split across socket reads is not reliably handled: the receive loop checks each new chunk for `\r\n\r\n` before accumulating it.
+- Responses are sent with one `send()` call and the return value is not checked, so partial writes are not handled.
+- The unsupported-content-type branch sets status `415`, but the response reason-phrase map does not yet include it and currently serializes it as `Internal Server Error`.
+- Middleware can be registered with `Router::use`, but is not invoked by the router yet.
+
+## Next steps
+
+- Make the static root configurable instead of hard-coding a developer-specific path.
+- Replace detached threads with a bounded thread pool or event-driven I/O.
+- Make request parsing incremental and robust across arbitrary TCP chunk boundaries.
+- Add proper response write loops, HTTP error handling, and request limits.
+- Add automated tests for routing, static-path containment, parsing, and response serialization.
