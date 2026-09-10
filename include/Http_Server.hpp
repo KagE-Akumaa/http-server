@@ -4,20 +4,21 @@
 #include "router.hpp"
 #include <netinet/in.h>
 class HTTP_SERVER {
-    int serverSocket = -1;
-    sockaddr_in serverSocketAddress;
+        int serverSocket = -1;
+        sockaddr_in serverSocketAddress;
 
-    Router &r;
+        std::string persisitentBuffer{};
+        Router &r;
 
-  public:
-    HTTP_SERVER(int PORT, Router &r);
-    ~HTTP_SERVER();
-    HTTP_SERVER(const HTTP_SERVER &) = delete;
-    HTTP_SERVER &operator=(const HTTP_SERVER &) = delete;
+      public:
+        HTTP_SERVER(int PORT, Router &r);
+        ~HTTP_SERVER();
+        HTTP_SERVER(const HTTP_SERVER &) = delete;
+        HTTP_SERVER &operator=(const HTTP_SERVER &) = delete;
 
-    void run();
+        void run();
 
-    void connectionHandler(ClientSocket clientFd);
+        void connectionHandler(ClientSocket clientFd);
 
-    std::string responseSerialization(Response &res);
+        std::string responseSerialization(Response &res);
 };
