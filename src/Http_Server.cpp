@@ -6,6 +6,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -25,6 +26,40 @@ void debug(Request &req) {
 
         std::cout << req.body << std::endl;
 }
+
+namespace {
+bool shouldKeepAlive(const Request &req) {
+        auto it = req.headers.find("connection");
+        const std::string connection =
+            (it != req.headers.end()) ? it->second : "";
+
+        if (connection.find("close") != std::string::npos) {
+                return false;
+        }
+
+        if (req.version == "HTTP/1.1") {
+                return true;
+        }
+
+        if (req.version == "HTTP/1.0") {
+                return connection.find("keep-alive") != std::string::npos;
+        }
+
+        return false;
+}
+
+bool sendAll(int fd, const std::string &data) {
+        size_t sent = 0;
+        while (sent < data.size()) {
+                ssize_t n = send(fd, data.data() + sent, data.size() - sent, 0);
+                if (n <= 0) {
+                        return false;
+                }
+                sent += static_cast<size_t>(n);
+        }
+        return true;
+}
+} // namespace
 
 HTTP_SERVER::HTTP_SERVER(int PORT, Router &r) : r(r) {
 
@@ -80,170 +115,114 @@ HTTP_SERVER::~HTTP_SERVER() {
 }
 
 void HTTP_SERVER::connectionHandler(ClientSocket clientFd) {
-        //
-
-        // NOTE: We need to make the connection open and for that if the
-        // read syscall return 0 then we can close the connection or the
-        // http-request contains the connection close header line close the
-        // connection Now we create a main buffer which will be responsible
-        // for getting all the http-request and a temp buffer which will be
-        // responsible for getting all the bytes from the read syscall and
-        // appending it to the main buffer
-        std::string request{};
+        // NOTE: Keep the TCP connection open across requests. Extra bytes
+        // already read (pipelined requests) stay in leftover for the next
+        // cycle. The connection closes when the client sends Connection:
+        // close, uses HTTP/1.0 without keep-alive, or a read/write fails.
+        std::string leftover;
         std::vector<char> requestBuffer(8000, 0);
 
-        // Check the persisitentBuffer if not empty add the extra bytes from the
-        // previous cycle
-        if (!persisitentBuffer.empty()) {
-                request.append(persisitentBuffer.begin(),
-                               persisitentBuffer.end());
-                // NOTE: Clear the persisitentBuffer
-                persisitentBuffer.clear();
-        }
         while (true) {
-                // NOTE: First we need a buffer to store the http-request size -
-                // 8kb
-                // TODO: Add enums for the size
+                std::string request = std::move(leftover);
+                leftover.clear();
 
-                ssize_t bytesRead = read(clientFd.getFd(), requestBuffer.data(),
-                                         requestBuffer.size());
+                while (request.find("\r\n\r\n") == std::string::npos) {
+                        ssize_t bytesRead =
+                            read(clientFd.getFd(), requestBuffer.data(),
+                                 requestBuffer.size());
 
-                if (bytesRead == 0) {
-                        // NOTE: Need to close the connection
-                        // TODO: how to close the connection?
-                        return;
-                }
-                if (bytesRead == -1) {
-                        // NOTE: Error so can we throw here?
-                        // We don't throw here because our thread is using
-                        // detach so it will directly goes to std::terminate
-                        // which will terminate the whole server instead we just
-                        // logs the error
-                        std::cerr << "Failed reading the http-request: "
-                                  << std::strerror(errno);
-                        return;
-                }
-
-                // If we reached here then we got bytesRead
-                // Append the result
-                request.append(requestBuffer.begin(),
-                               requestBuffer.begin() + bytesRead);
-                size_t headerPos = request.find("\r\n\r\n");
-                if (headerPos == std::string::npos) {
-                        // We need to read again and again until we found the
-                        // \r\n\r\n
-                        continue;
-
-                } else {
-                        // NOTE: This means we found the headers we can just
-                        //  and break the loop
-                        break;
-                }
-        }
-        // NOTE: Now we have to parse the main to check if that
-        // contains the content-length if yes then we need to read
-        // the body too else we just break the loop
-
-        Request req;
-        Response res;
-        Parser p;
-
-        size_t requestLinePos = request.find("\r\n");
-
-        std::string requestLine = request.substr(0, requestLinePos);
-
-        p.getRequestLine(requestLine, req);
-
-        // Request Line are successfully parsed
-
-        // Now request header :->
-
-        // requestLine + 1 -> "\r\n\r\n"
-
-        size_t requestHeaderStart = requestLinePos + 2;
-        size_t requestHeaderPos = request.find("\r\n\r\n", requestHeaderStart);
-
-        std::string requestHeader = request.substr(
-            requestHeaderStart, requestHeaderPos - requestHeaderStart);
-
-        p.getRequestHeaders(requestHeader, req);
-
-        // NOTE: We can just simply get all the body first and then we can parse
-        // it
-
-        // Now comes the request body only if content-length exits
-        if (req.headers.find("content-length") != req.headers.end()) {
-                // NOTE: We might have read some of the body after '\r\n\r\n'
-                // Remember to add 4 bytes for the \r\n\r\n :)
-                std::string bodyBuffer = request.substr(requestHeaderPos + 4);
-
-                // FIX: Remove these magic numbers once this works :)
-                std::vector<char> buff(8000, 0);
-                unsigned long clength =
-                    std::stoi(req.headers["content-length"]);
-                while (bodyBuffer.size() < clength) {
-
-                        ssize_t bread =
-                            read(clientFd.getFd(), buff.data(), buff.size());
-
-                        if (bread == 0) {
-                                break;
+                        if (bytesRead == 0) {
+                                return;
                         }
-
-                        if (bread == -1) {
-                                std::cerr << "Failed reading http body"
+                        if (bytesRead == -1) {
+                                std::cerr << "Failed reading the http-request: "
                                           << std::strerror(errno);
                                 return;
                         }
 
-                        // We have bytes read - append them
-                        bodyBuffer.append(buff.begin(), buff.begin() + bread);
+                        request.append(requestBuffer.begin(),
+                                       requestBuffer.begin() + bytesRead);
                 }
 
-                if (bodyBuffer.size() > clength) {
-                        // NOTE: There are some extra bytes inside this which
-                        // needs to be extracted and put inside the persistent
-                        // buffer which will be read on the next cycle
+                Request req;
+                Response res;
+                Parser p;
 
-                        persisitentBuffer.append(bodyBuffer.begin() + clength,
-                                                 bodyBuffer.end());
+                size_t requestLinePos = request.find("\r\n");
+                if (requestLinePos == std::string::npos) {
+                        return;
+                }
 
-                        // Update the request body
-                        req.body.append(bodyBuffer.begin(),
-                                        bodyBuffer.begin() + clength);
-                } else if (bodyBuffer.size() == clength) {
-                        req.body.append(bodyBuffer.begin(),
-                                        bodyBuffer.begin() + clength);
+                std::string requestLine = request.substr(0, requestLinePos);
+
+                p.getRequestLine(requestLine, req);
+
+                size_t requestHeaderStart = requestLinePos + 2;
+                size_t requestHeaderPos =
+                    request.find("\r\n\r\n", requestHeaderStart);
+
+                std::string requestHeader = request.substr(
+                    requestHeaderStart, requestHeaderPos - requestHeaderStart);
+
+                p.getRequestHeaders(requestHeader, req);
+
+                if (req.headers.find("content-length") != req.headers.end()) {
+                        std::string bodyBuffer =
+                            request.substr(requestHeaderPos + 4);
+
+                        std::vector<char> buff(8000, 0);
+                        unsigned long clength =
+                            std::stoi(req.headers["content-length"]);
+                        while (bodyBuffer.size() < clength) {
+                                ssize_t bread = read(clientFd.getFd(),
+                                                     buff.data(), buff.size());
+
+                                if (bread == 0) {
+                                        return;
+                                }
+
+                                if (bread == -1) {
+                                        std::cerr << "Failed reading http body"
+                                                  << std::strerror(errno);
+                                        return;
+                                }
+
+                                bodyBuffer.append(buff.begin(),
+                                                  buff.begin() + bread);
+                        }
+
+                        leftover = bodyBuffer.substr(clength);
+                        req.body = bodyBuffer.substr(0, clength);
                 } else {
-                        // TODO: Not decided yet
+                        leftover = request.substr(requestHeaderPos + 4);
+                }
+
+                debug(req);
+
+                std::cout << req.body.size() << std::endl;
+                std::cout << req.headers["content-length"] << std::endl;
+
+                r.match(req, res);
+
+                res.version = req.version;
+                const bool keepAlive = shouldKeepAlive(req);
+                res.headers["connection"] = keepAlive ? "keep-alive" : "close";
+                if (res.headers.find("content-length") == res.headers.end()) {
+                        const size_t length = !res.body.empty()
+                                                  ? res.body.size()
+                                                  : res.bodyBytes.size();
+                        res.headers["content-length"] = std::to_string(length);
+                }
+
+                std::string finalResponse = responseSerialization(res);
+                if (!sendAll(clientFd.getFd(), finalResponse)) {
+                        return;
+                }
+
+                if (!keepAlive) {
+                        return;
                 }
         }
-
-        else {
-                // NOTE: If the request does not have a body still it
-                // can have extra bytes after \r\n\r\n we need to add
-                // those to persisitentBuffer
-                size_t pos = request.find("\r\n\r\n") + 4;
-
-                if (request.size() > pos) {
-
-                        persisitentBuffer.append(request.begin() + pos,
-                                                 request.end());
-                }
-        }
-
-        // FIX: This function is just for debugging purposes -> delete
-        // later
-        debug(req);
-
-        std::cout << req.body.size() << std::endl;
-        std::cout << req.headers["content-length"] << std::endl;
-
-        r.match(req, res);
-
-        res.version = req.version;
-        std::string finalResponse = responseSerialization(res);
-        send(clientFd.getFd(), finalResponse.c_str(), finalResponse.size(), 0);
 }
 
 void HTTP_SERVER::run() {
@@ -281,9 +260,8 @@ void HTTP_SERVER::run() {
                 //        std::thread t(connectionHandler,
                 //        std::move(clientFd));
 
-                // FIX: Don't know what it does it just works for now :)
-                // it just let me change the static connectionHandler to
-                // non static so i can use the router member variable
+                // NOTE: it just let me change the static connectionHandler to
+                //  non static so i can use the router member variable
                 std::thread t([this, fd = std::move(clientFd)]() mutable {
                         this->connectionHandler(std::move(fd));
                 });

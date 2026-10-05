@@ -7,7 +7,6 @@ class HTTP_SERVER {
         int serverSocket = -1;
         sockaddr_in serverSocketAddress;
 
-        std::string persisitentBuffer{};
         Router &r;
 
       public:

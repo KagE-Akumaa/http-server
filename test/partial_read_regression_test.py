@@ -35,6 +35,44 @@ def assert_no_response_yet(client: socket.socket) -> None:
         raise AssertionError("server responded before the complete header boundary")
 
 
+def header_value(headers: bytes, name: str) -> str | None:
+    text = headers.decode("latin1")
+    target = name.lower()
+    for line in text.split("\r\n")[1:]:
+        key, _, value = line.partition(":")
+        if key.lower() == target:
+            return value.strip()
+    return None
+
+
+def read_http_response(client: socket.socket) -> bytes:
+    data = bytearray()
+    while b"\r\n\r\n" not in data:
+        try:
+            part = client.recv(4096)
+        except socket.timeout as error:
+            raise AssertionError("server did not parse the complete request") from error
+        if not part:
+            raise AssertionError("connection closed before a complete response")
+        data.extend(part)
+
+    header_end = data.find(b"\r\n\r\n")
+    length_header = header_value(bytes(data[:header_end]), "content-length")
+    if length_header is None:
+        raise AssertionError(f"response missing Content-Length: {bytes(data)!r}")
+    content_length = int(length_header)
+    body_start = header_end + 4
+    while len(data) < body_start + content_length:
+        try:
+            part = client.recv(4096)
+        except socket.timeout as error:
+            raise AssertionError("server did not parse the complete request") from error
+        if not part:
+            raise AssertionError("connection closed before a complete body")
+        data.extend(part)
+    return bytes(data[: body_start + content_length])
+
+
 def send_fragmented_request(chunks: list[bytes]) -> bytes:
     with socket.create_connection((HOST, PORT), timeout=2) as client:
         client.settimeout(2)
@@ -42,16 +80,7 @@ def send_fragmented_request(chunks: list[bytes]) -> bytes:
         assert_no_response_yet(client)
         for chunk in chunks[1:]:
             client.sendall(chunk)
-
-        response = bytearray()
-        while True:
-            try:
-                part = client.recv(4096)
-            except socket.timeout as error:
-                raise AssertionError("server did not parse the complete request") from error
-            if not part:
-                return bytes(response)
-            response.extend(part)
+        return read_http_response(client)
 
 
 def assert_successful_response(response: bytes) -> None:

@@ -1,6 +1,6 @@
 # http-server
 
-A small, educational HTTP server written in C++20 with POSIX sockets. It listens on port `8989`, accepts TCP connections, parses one HTTP request per connection, dispatches simple `GET` and `POST` routes, and falls back to serving files from `assets/`.
+A small, educational HTTP server written in C++20 with POSIX sockets. It listens on port `8989`, accepts TCP connections, parses HTTP/1.1 requests (including keep-alive and pipelined requests on the same socket), dispatches simple `GET` and `POST` routes, and falls back to serving files from `assets/`.
 
 The executable currently exposes a small JSON API at `/` and serves the bundled image and `404.html` page as static content. It is a learning project, not a production web server.
 
@@ -9,6 +9,7 @@ The executable currently exposes a small JSON API at `/` and serves the bundled 
 - Opens a TCP listening socket with `SO_REUSEADDR` and a listen backlog of 10.
 - Creates a detached `std::thread` for each accepted client.
 - Parses an HTTP request line, headers, and a request body when `Content-Length` is present.
+- Keeps HTTP/1.1 connections open across sequential or pipelined requests unless `Connection: close` is sent.
 - Registers exact-match `GET` and `POST` handlers.
 - Serves unmatched `GET` and `POST` paths from the configured static root.
 - Reads files in binary mode and resolves common MIME types.
@@ -21,7 +22,7 @@ The executable currently exposes a small JSON API at `/` and serves the bundled 
 flowchart LR
     C[HTTP client] -->|TCP connection| L[HTTP_SERVER\nlisten / accept]
     L -->|one detached thread| H[connectionHandler]
-    H --> P[Parser\nrequest line + headers + body]
+    H -->|per-connection loop| P[Parser\nrequest line + headers + body]
     P --> R[Router]
     R -->|exact GET or POST match| A[Route handler]
     R -->|no route match| S[StaticFileHandler]
@@ -29,18 +30,21 @@ flowchart LR
     A --> O[Response]
     F --> O
     O --> X[Response serialization]
-    X --> C
+    X -->|keep-alive or close| C
 ```
 
 ### Request handling
 
 ```text
-request bytes
-    -> read until the header terminator is found
-    -> parse request line and headers
-    -> if Content-Length is present, read the remaining body bytes
-    -> route or serve a static file
-    -> serialize one HTTP response and close the client socket
+connection accepted
+    -> loop:
+        read until the header terminator is found (including leftover bytes)
+        parse request line and headers
+        if Content-Length is present, read the remaining body bytes
+        keep extra buffered/pipelined bytes for the next request
+        route or serve a static file
+        serialize a response with Connection and Content-Length
+        close only on Connection: close, HTTP/1.0 without keep-alive, or I/O error
 ```
 
 ## Included endpoints
@@ -118,13 +122,11 @@ The static-file handler removes leading slashes, joins the requested path to the
 
 These are implementation constraints worth knowing before using the project beyond experimentation:
 
-- It serves one request per connection; keep-alive and pipelined requests are not supported.
 - It uses unbounded detached threads, so it is not suited to high concurrency.
 - It supports only the implemented `GET` and `POST` routing paths; unsupported methods do not receive a deliberate `405 Method Not Allowed` response.
 - It does not implement chunked transfer encoding, request-size limits, timeouts, TLS, or comprehensive HTTP/1.1 validation.
 - Header values are converted to lowercase during parsing, which is convenient for the current content-type check but is not correct for every HTTP header value.
 - A header delimiter split across socket reads is not reliably handled: the receive loop checks each new chunk for `\r\n\r\n` before accumulating it.
-- Responses are sent with one `send()` call and the return value is not checked, so partial writes are not handled.
 - The unsupported-content-type branch sets status `415`, but the response reason-phrase map does not yet include it and currently serializes it as `Internal Server Error`.
 - Middleware can be registered with `Router::use`, but is not invoked by the router yet.
 
