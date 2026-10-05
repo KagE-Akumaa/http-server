@@ -6,9 +6,9 @@ The current binary listens on port `8989`, exposes a JSON API at `/`, and serves
 
 ## What it does
 
-- **HTTP/1.1 server.** Listens with `SO_REUSEADDR`, accepts clients on detached threads, parses request line, headers, and `Content-Length` bodies, and keeps connections open unless `Connection: close` is sent.
+- **HTTP/1.1 server.** Listens with `SO_REUSEADDR`, accepts clients on detached threads, parses request line, headers, and `Content-Length` bodies, and keeps connections open unless `Connection: close` is sent. Header boundaries may be split across TCP reads.
 - **Express-style routing.** `Router::get` / `Router::post` register exact-match handlers, the same idea as `app.get` / `app.post` in Express. The first matching route handles the request; there is no parameterized path matching yet.
-- **Static file serving.** Paths that do not match a route are served from a static root, with MIME types resolved from file extensions. Missing files return `assets/404.html`.
+- **Static file serving.** Paths that do not match a `GET` or `POST` route are served from a static root, with MIME types resolved from file extensions. Missing files return `assets/404.html`.
 - **Directory-traversal protection.** The static handler canonicalizes the requested path and rejects anything that would escape the static root, including `..` segments, similarly prefixed directories, and symlink escapes.
 
 The static root is currently a hardcoded path in `src/main.cpp` (`/home/akumaa/Projects/http-server/assets`). If you clone the project elsewhere, change that path before running.
@@ -51,8 +51,9 @@ connection accepted
 | `GET /` | Returns a hard-coded JSON array of three users. |
 | `POST /` with `Content-Type: application/json` | Parses JSON and returns `200` with `{"message" : "JSON recieved"}`. |
 | `POST /` with malformed JSON | Returns `400` with an error JSON body. |
+| `POST /` with another content type | Returns `415` with a plain-text error body. |
 | `GET /images/anime-bg.png` | Serves the bundled PNG from `assets/images/`. |
-| Unknown/static path | Returns the custom `assets/404.html` page with `404`. |
+| Unknown `GET` or `POST` path | Returns the custom `assets/404.html` page with `404`. |
 
 Static files are not registered individually. An unmatched `GET` or `POST` is resolved under the static root, after the traversal checks above.
 
@@ -103,6 +104,17 @@ curl -sS -D - http://127.0.0.1:8989/images/anime-bg.png -o /dev/null
 curl -i http://127.0.0.1:8989/does-not-exist
 ```
 
+## Tests
+
+Build the server first, then run the socket-level regression tests:
+
+```bash
+python3 test/partial_read_regression_test.py ./build/http-server
+python3 test/keep_alive_integration_test.py ./build/http-server
+```
+
+The tests cover headers fragmented across TCP reads, sequential requests on one connection, and pipelined requests.
+
 ## Project layout
 
 ```text
@@ -135,7 +147,8 @@ These are implementation constraints worth knowing before using the project beyo
 - It uses unbounded detached threads, so it is not suited to high concurrency.
 - It does not implement chunked transfer encoding, request-size limits, timeouts, TLS, or comprehensive HTTP/1.1 validation.
 - Header values are converted to lowercase during parsing, which is convenient for the current content-type check but is not correct for every HTTP header value.
-- A header delimiter split across socket reads is not reliably handled: the receive loop checks each new chunk for `\r\n\r\n` before accumulating it.
+- The parser accepts request bodies only when `Content-Length` is present; chunked request bodies are not supported.
+- The receive loop has no request-size limit, so a client can grow an in-memory request without bound.
 - The unsupported-content-type branch sets status `415`, but the response reason-phrase map does not yet include it and currently serializes it as `Internal Server Error`.
 
 ## Next steps
