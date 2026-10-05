@@ -1,20 +1,17 @@
 # http-server
 
-A small, educational HTTP server written in C++20 with POSIX sockets. It listens on port `8989`, accepts TCP connections, parses HTTP/1.1 requests (including keep-alive and pipelined requests on the same socket), dispatches simple `GET` and `POST` routes, and falls back to serving files from `assets/`.
+A small HTTP server in C++20 with POSIX sockets. It accepts TCP connections, speaks HTTP/1.1 (including keep-alive), and dispatches requests through an Express-style router: you register `GET` and `POST` handlers, and unmatched paths fall through to static file serving.
 
-The executable currently exposes a small JSON API at `/` and serves the bundled image and `404.html` page as static content. It is a learning project, not a production web server.
+The current binary listens on port `8989`, exposes a JSON API at `/`, and serves files from `assets/`. It is a learning project, not a production web server.
 
 ## What it does
 
-- Opens a TCP listening socket with `SO_REUSEADDR` and a listen backlog of 10.
-- Creates a detached `std::thread` for each accepted client.
-- Parses an HTTP request line, headers, and a request body when `Content-Length` is present.
-- Keeps HTTP/1.1 connections open across sequential or pipelined requests unless `Connection: close` is sent.
-- Registers exact-match `GET` and `POST` handlers.
-- Serves unmatched `GET` and `POST` paths from the configured static root.
-- Reads files in binary mode and resolves common MIME types.
-- Uses canonical filesystem paths to reject requests that resolve outside the static root, including traversal and symlink escapes.
-- Returns `assets/404.html` when a requested static file is missing or rejected.
+- **HTTP/1.1 server.** Listens with `SO_REUSEADDR`, accepts clients on detached threads, parses request line, headers, and `Content-Length` bodies, and keeps connections open unless `Connection: close` is sent.
+- **Express-style routing.** `Router::get` / `Router::post` register exact-match handlers, the same idea as `app.get` / `app.post` in Express. The first matching route handles the request; there is no parameterized path matching yet.
+- **Static file serving.** Paths that do not match a route are served from a static root, with MIME types resolved from file extensions. Missing files return `assets/404.html`.
+- **Directory-traversal protection.** The static handler canonicalizes the requested path and rejects anything that would escape the static root, including `..` segments, similarly prefixed directories, and symlink escapes.
+
+The static root is currently a hardcoded path in `src/main.cpp` (`/home/akumaa/Projects/http-server/assets`). If you clone the project elsewhere, change that path before running.
 
 ## Architecture
 
@@ -57,7 +54,20 @@ connection accepted
 | `GET /images/anime-bg.png` | Serves the bundled PNG from `assets/images/`. |
 | Unknown/static path | Returns the custom `assets/404.html` page with `404`. |
 
-Static files are not registered individually: an unmatched route is mapped below the static root.
+Static files are not registered individually. An unmatched `GET` or `POST` is resolved under the static root, after the traversal checks above.
+
+Routing looks like Express: register handlers on a `Router`, then pass it to the server.
+
+```cpp
+Router myRouter("/path/to/assets");
+myRouter.get("/", [](const Request &req, Response &res) {
+    res.status(200);
+    res.setContentType("application/json");
+    res.setBody(R"({"message": "hello"})");
+});
+HTTP_SERVER app(8989, myRouter);
+app.run();
+```
 
 ## Build
 
@@ -73,9 +83,7 @@ cmake --build build
 ./build/http-server
 ```
 
-The server listens on `http://127.0.0.1:8989` (on all local interfaces via `INADDR_ANY`).
-
-> **Current configuration note:** `src/main.cpp` hard-codes the static directory as `/home/akumaa/Projects/http-server/assets`. If you clone the project elsewhere, update that path before running the executable.
+The server listens on `http://127.0.0.1:8989` (on all local interfaces via `INADDR_ANY`). Update the hardcoded static-root path in `src/main.cpp` if the project does not live at `/home/akumaa/Projects/http-server`.
 
 ## Try it
 
@@ -116,19 +124,19 @@ curl -i http://127.0.0.1:8989/does-not-exist
 
 ## Static-file safety
 
-The static-file handler removes leading slashes, joins the requested path to the configured root, then uses `std::filesystem::weakly_canonical`. It compares path components—not string prefixes—to ensure the resolved file remains within the canonical static root. This prevents `..` traversal, similarly prefixed directories, and symlinks that escape the root.
+The static-file handler strips a leading slash, joins the request path to the static root, then uses `std::filesystem::weakly_canonical`. It compares path components—not string prefixes—so a resolved file must stay inside that root. That blocks directory-traversal attacks (`../etc/passwd`), lookalike directories that only share a prefix, and symlinks that point outside the root.
 
 ## Current limitations
 
 These are implementation constraints worth knowing before using the project beyond experimentation:
 
+- The static-file root is hardcoded in `src/main.cpp`; it is not a command-line or config option yet.
+- Routing is exact-match `GET` / `POST` only. There are no Express-style path parameters (`/users/:id`), unsupported methods do not get a `405`, and `Router::use` middleware is registered but not invoked.
 - It uses unbounded detached threads, so it is not suited to high concurrency.
-- It supports only the implemented `GET` and `POST` routing paths; unsupported methods do not receive a deliberate `405 Method Not Allowed` response.
 - It does not implement chunked transfer encoding, request-size limits, timeouts, TLS, or comprehensive HTTP/1.1 validation.
 - Header values are converted to lowercase during parsing, which is convenient for the current content-type check but is not correct for every HTTP header value.
 - A header delimiter split across socket reads is not reliably handled: the receive loop checks each new chunk for `\r\n\r\n` before accumulating it.
 - The unsupported-content-type branch sets status `415`, but the response reason-phrase map does not yet include it and currently serializes it as `Internal Server Error`.
-- Middleware can be registered with `Router::use`, but is not invoked by the router yet.
 
 ## Next steps
 
